@@ -2,42 +2,24 @@ import resolve from '@rollup/plugin-node-resolve';
 import html from '@open-wc/rollup-plugin-html';
 import copy from 'rollup-plugin-copy';
 
-export default [
-    {
-        external: ["analyzer", "nydus"],
-        input: 'html/*.html',
-        output: {
-            dir: 'dist',
-            paths: {
-                analyzer: './analyzer.js',
-                nydus: "./nydus.js"
-            }
-        },
-        plugins: [
-            html({
-                minify: false,
-            }),
-            copy({
-                targets: [
-                    { src: 'icons/*', dest: 'dist' },
-                    { src: 'manifest.json', dest: 'dist' },
-                ],
-            }),
-            resolve()
-        ],
-    },
+const DEV_MODE = process.env.NODE_ENV === "DEV";
+console.log("DEV MODE : ", DEV_MODE)
+
+const DEV_MODE_INPUTS = [
     {
         external: ["analyzer"],
         input: {
             'content_script': './lib/content/content_script.js',
             'nydus': './packages/nydus/nydus.js',
+            'custom-element-tree': './packages/element-tree/lib/custom-element-tree.js',
             'background': './lib/background/background.js',
             'background-worker': './lib/background/background-worker.js',
-            //"crawler-constants": './lib/crawler/crawler-constants.js',
             'spotlight-border': './lib/crawler/spotlight-border.js',
             'content-messaging': './lib/content/content-messaging.js',
             'connection-channels': './lib/types/connection-channels.js',
-            'message-types': './lib/types/message-types.js'
+            'message-types': './lib/types/message-types.js',
+            'messaging': './lib/messaging/messaging.js',
+            'block-list': './lib/util/block-list.js'
         },
         output: {
             dir: 'dist',
@@ -57,6 +39,33 @@ export default [
         plugins: [
             resolve(),
         ],
+    }
+];
+
+const PROD_INPUTS = [
+    {
+        external: ["analyzer", "nydus", "custom-element-tree"],
+        input: 'html/*.html',
+        output: {
+            dir: 'dist',
+            paths: {
+                analyzer: './analyzer.js',
+                nydus: "./nydus.js",
+                "custom-element-tree": "./custom-element-tree.js"
+            }
+        },
+        plugins: [
+            html({
+                minify: false,
+            }),
+            copy({
+                targets: [
+                    { src: 'icons/*', dest: 'dist' },
+                    { src: 'manifest.json', dest: 'dist' },
+                ],
+            }),
+            resolve()
+        ],
     },
     {
         input: {
@@ -67,4 +76,9 @@ export default [
             resolve(),
         ],
     }
+];
+
+export default [
+    ...DEV_MODE_INPUTS,
+    ...(DEV_MODE ? [] : PROD_INPUTS)
 ];

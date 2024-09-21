@@ -58,6 +58,7 @@ const NYDUS_TAB_PING = 'NYDUS_TAB_PING';
  * @returns {Nydus} nydus;
  */
 export function buildNydus(nydusOptions) {
+    return;
     const nydus = new Nydus(nydusOptions);
 
     return nydus;
@@ -124,7 +125,6 @@ export class Nydus {
 
     _setActiveTabAsLatestActivatedTab() {
         chrome.tabs?.query({ active: true, currentWindow: true }, tabs => {
-            console.log("[Nydus]: Setting up latest active tab", tabs[0]?.id);
             this._latestActivatedTab = tabs[0]?.id ?? this._latestActivatedTab;
         });
     }
@@ -210,7 +210,7 @@ export class Nydus {
      * @param {boolean} isBackground
      * @param {string | number} bridge
      */
-    addConnection(connectionId, isClient, onMessage, isBackground = false, bridge = false) {
+    addConnection(connectionId, isClient, onMessage, isBackground = false, bridge) {
         if (this.connections[connectionId]) {
             console.warn("[WebComponentDevTools]: Duplicate connection attempt");
             return; // No duplicates
@@ -353,30 +353,37 @@ export class Nydus {
         const connection = await this._createConnection(nydusConnection, isBackground);
         nydusConnection.connection = connection;
 
-        connection.onMessage.addListener(
-            /** @this { Nydus } */
-            function finishHandshake(/** @type {any} */ message) {
-                if (message.type !== NYDUS_CONNECTION_HANDSHAKE) return;
+        let handShakeFinisher;
+        /** @this { Nydus } */
+        function finishHandshake(/** @type {any} */ message) {
+            if (message.type !== NYDUS_CONNECTION_HANDSHAKE) return;
 
-                this._handleConnectionHandshakeMessage(message, nydusConnection);
-                connection.onMessage.removeListener(finishHandshake);
+            connection.onMessage.removeListener(handShakeFinisher);
 
-                if (bridge) {
-                    const onBridgeMessage = message => this.message(bridge, message);
-                    connection.onMessage.addListener(onBridgeMessage);
-                    connection.onDisconnect.addListener(() => {
-                        connection.onMessage.removeListener(onBridgeMessage);
-                    });
-                }
+            this._handleConnectionHandshakeMessage(message, nydusConnection);
 
-                if (onMessage) {
-                    connection.onMessage.addListener(onMessage);
-                    connection.onDisconnect.addListener(() => {
-                        connection.onMessage.removeListener(onMessage);
-                    });
-                }
-            }.bind(this),
-        );
+            if (bridge) {
+                const onBridgeMessage = message => this.message(bridge, message);
+
+                connection.onMessage.addListener(onBridgeMessage);
+                connection.onDisconnect.addListener(() => {
+                    console.log("ON DISCONNECT");
+                    connection.onMessage.removeListener(onBridgeMessage);
+                });
+            }
+
+            if (onMessage) {
+                connection.onMessage.addListener(onMessage);
+                connection.onDisconnect.addListener(() => {
+                    console.log("ON DISCONNECT");
+                    connection.onMessage.removeListener(onMessage);
+                });
+            }
+        }
+
+        handShakeFinisher = finishHandshake.bind(this);
+
+        connection.onMessage.addListener(handShakeFinisher);
     }
 
     disconnectAll() {
@@ -391,25 +398,29 @@ export class Nydus {
      * @param {boolean} isBackground
      */
     _createConnection(nydusConnection, isBackground) {
-        return new Promise(async resolve => {
+        return new Promise(async (resolve, reject) => {
             let connection;
             let tabId;
 
             // In devtools context we need to specify which tab to target
-            if (this._canAccessTabs() && !isBackground) {
-                tabId = await this._tryGetCurrentTab();
-                connection = chrome.tabs.connect(tabId, {
-                    name: nydusConnection.id.toString(),
-                });
-            } else {
-                tabId = -1;
-                connection = chrome.runtime.connect({
-                    name: nydusConnection.id.toString(),
-                });
+            try {
+                if (this._canAccessTabs() && !isBackground) {
+                    tabId = await this._tryGetCurrentTab();
+                    connection = chrome.tabs.connect(tabId, {
+                        name: nydusConnection.id.toString(),
+                    });
+                } else {
+                    tabId = -1;
+                    connection = chrome.runtime.connect({
+                        name: nydusConnection.id.toString(),
+                    });
+                }
+                this._addConnectionToPool(tabId, nydusConnection);
+                this._addConnectionOnDisconnectListeners(connection, nydusConnection.id.toString(), tabId);
+                resolve(connection);
+            } catch (ex) {
+                reject("Could not establish connection between layers.\n\n" + ex)
             }
-            this._addConnectionToPool(tabId, nydusConnection);
-            this._addConnectionOnDisconnectListeners(connection, nydusConnection.id.toString(), tabId);
-            resolve(connection);
         });
     }
 
@@ -472,7 +483,7 @@ export class Nydus {
                 let nydusConnectionCopy = { ...nydusConnection };
                 nydusConnectionCopy.tabId = isBackground ? -1 : tabId ?? this.nydusTab;
                 if (this.isBackground) {
-                    console.log("[Nydus]: Setting up connection ", nydusConnectionCopy)
+                    console.warn("[Nydus]: Setting up connection ", nydusConnectionCopy)
                 }
                 this._handleClientHandshake(connection, nydusConnectionCopy);
 
